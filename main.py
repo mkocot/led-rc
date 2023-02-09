@@ -1,129 +1,110 @@
 import evdev
-import select
-import urllib
-import urllib.request
-from urllib.error import URLError, HTTPError
+import asyncio
+from state import LightController
+from autolight import AutoLight
 
-class State:
-    level:int = 0
-    is_on: bool = False
+controlled = LightController()
+controlled.fetch()
+controlled.set_active('white')
 
-    def __init__(self, level, is_on):
-        self.level = level
-        self.is_on = is_on
+autolight = AutoLight(controlled)
 
-    def __str__(self):
-        return f'{{level: {self.level}, is_on: {self.is_on}}}'
-
-colours = ['red', 'green', 'blue', 'white', 'all']
-levels = {}
-active = 'white'
-
-def do_network(method, action, colour, value=None):
-    #path = 'http://10.0.0.203/api/v1/led/duty?name='
-    #path = 'http://10.0.0.203/api/v1/led/on?name='
-    #path = 'http://10.0.0.203/api/v1/led/off?name='
-    if action not in ['duty', 'on', 'off']:
-        raise Exception("BAD ACTION")
-    if method == 'PUT' and value is None and action in ['duty']:
-        raise Exception("BAD VALUE")
-    path = f'http://10.0.0.203/api/v1/led/{action}?name={colour}'
-    if method == 'PUT' and value is not None:
-        path += f'&value={value}'
-    print('path', path, 'method', method, 'value', value)
-    req = urllib.request.Request(path, data=b'', method=method)
-    try:
-        res = urllib.request.urlopen(req, timeout=1)
-        return res.read()
-    except URLError:
-        print("TIMEOUT")
-        pass
-    return None
-
-def put(action, colour, value=None):
-    return do_network('PUT', action, colour, value) == b'OK'
-
-def get(action, colour):
-    return do_network('GET', action, colour)
-
-# bootstrap values
-for c in colours:
-    duty = int(get('duty', c))
-    is_on = int(get('on', c)) == 1
-    levels[c] = State(duty, is_on)
-    print('Colour: ', c, str(levels[c]))
-
-
-def put_level(colour, level):
-    if level > 255:
-        level = 255
-    if level < 0:
-        level = 0
-    if put('duty', colour, level):
-        levels[colour].level = level
-
-def put_switch(colour, on):
-    if put('on' if on else 'off', colour):
-        levels[colour].is_on = on
-    else:
-        print('put fialed')
 
 def change(direction):
     def _c():
-        global active
-        put_level(active, levels[active].level + direction)
+        # don't go to 0
+        if controlled.active.level + direction == 0:
+            return
+        controlled.active.change(direction)
     return _c
+
 
 def toggle():
     def _t():
-        put_switch('all', not levels['all'].is_on)
+        controlled.colours['all'].toggle()
     return _t
+
 
 def toggle_active():
     def _t():
-        global active
-        put_switch(active, not levels[active].is_on)
+        controlled.active.toggle()
     return _t
+
 
 def set_level(level):
     def _post():
-        global active
-        put_level(active, level)
+        controlled.active.set_level(level)
     return _post
+
 
 def change_active(colour):
     def _f():
-        global active
-        active = colour
+        controlled.active = controlled.colours[colour]
     return _f
 
+
 codes_to_action = {
-        'KEY_POWER': toggle(),
-        'KEY_DOWN': change(-1),
-        'KEY_UP': change(1),
-        'KEY_0': set_level(0),
-        'KEY_1': set_level(4),
-        'KEY_2': set_level(8),
-        'KEY_3': set_level(76),
-        'KEY_4': set_level(122),
-        'KEY_5': set_level(153),
-        'KEY_6': set_level(178),
-        'KEY_7': set_level(198),
-        'KEY_8': set_level(230),
-        'KEY_9': set_level(255),
-        'KEY_RED': change_active('red'),
-        'KEY_GREEN': change_active('green'),
-        'KEY_BLUE': change_active('blue'),
-        'KEY_YELLOW': change_active('white'),
-        'KEY_OK': toggle_active(),
+    'KEY_POWER': toggle(),
+    'KEY_DOWN': (change(-1), (evdev.KeyEvent.key_down, evdev.KeyEvent.key_hold)),
+    'KEY_UP': (change(1), (evdev.KeyEvent.key_down, evdev.KeyEvent.key_hold)),
+    'KEY_0': set_level(0),
+    'KEY_1': set_level(4),
+    'KEY_2': set_level(8),
+    'KEY_3': set_level(76),
+    'KEY_4': set_level(122),
+    'KEY_5': set_level(153),
+    'KEY_6': set_level(178),
+    'KEY_7': set_level(198),
+    'KEY_8': set_level(230),
+    'KEY_9': set_level(255),
+    'KEY_RED': change_active('red'),
+    'KEY_GREEN': change_active('green'),
+    'KEY_BLUE': change_active('blue'),
+    'KEY_YELLOW': change_active('white'),
+    'KEY_OK': toggle_active(),
 }
 
-device = evdev.InputDevice('/dev/input/by-path/platform-1f02000.ir-event')
-print(device)
-for event in device.read_loop():
-    if event.type != evdev.ecodes.EV_KEY:
-        continue
-    key = evdev.categorize(event)
-    if key.keystate != key.key_down:
-        continue
-    codes_to_action[key.keycode]()
+
+async def ir_receiver():
+    device = evdev.InputDevice('/dev/input/by-path/platform-1f02000.ir-event')
+    print(device)
+
+    def _dispatch():
+        for event in device.read():
+            if event.type != evdev.ecodes.EV_KEY:
+                continue
+            key = evdev.categorize(event)
+            tuple_or_func = codes_to_action[key.keycode]
+            if not isinstance(tuple_or_func, tuple):
+                tuple_or_func = (tuple_or_func, (key.key_down,))
+            func, keys = tuple_or_func
+            if key.keystate not in keys:
+                continue
+            func()
+
+    loop = asyncio.get_running_loop()
+    while loop.is_running():
+        future = loop.create_future()
+        future.add_done_callback = _dispatch
+        loop.add_reader(device.fileno(), future.set_result, None)
+        await future
+
+
+async def auto_light_adjust():
+    loop = asyncio.get_running_loop()
+    while loop.is_running():
+        autolight.tick()
+        await asyncio.sleep(60)
+
+
+async def main():
+    auto_light_task = asyncio.create_task(auto_light_adjust())
+    ir_receiver_task = asyncio.create_task(ir_receiver())
+    done, pending = await asyncio.wait([auto_light_task, ir_receiver_task], return_when=asyncio.FIRST_COMPLETED)
+    for p in pending:
+        p.cancel()
+        await p
+    print("dang")
+
+
+asyncio.run(main())
