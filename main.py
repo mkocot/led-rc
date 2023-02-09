@@ -91,7 +91,7 @@ async def auto_light_adjust():
 
 async def main():
     auto_light_task = asyncio.create_task(auto_light_adjust())
-    ir_receiver_task = asyncio.to_thread(ir_receiver)
+    ir_receiver_task = asyncio.create_task(asyncio.to_thread(ir_receiver))
     done, pending = await asyncio.wait([auto_light_task, ir_receiver_task], return_when=asyncio.FIRST_COMPLETED)
     for p in pending:
         p.cancel()
