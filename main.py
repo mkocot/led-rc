@@ -65,29 +65,21 @@ codes_to_action = {
 }
 
 
-async def ir_receiver():
+def ir_receiver():
     device = evdev.InputDevice('/dev/input/by-path/platform-1f02000.ir-event')
     print(device)
 
-    def _dispatch():
-        for event in device.read():
-            if event.type != evdev.ecodes.EV_KEY:
-                continue
-            key = evdev.categorize(event)
-            tuple_or_func = codes_to_action[key.keycode]
-            if not isinstance(tuple_or_func, tuple):
-                tuple_or_func = (tuple_or_func, (key.key_down,))
-            func, keys = tuple_or_func
-            if key.keystate not in keys:
-                continue
-            func()
-
-    loop = asyncio.get_running_loop()
-    while loop.is_running():
-        future = loop.create_future()
-        future.add_done_callback = _dispatch
-        loop.add_reader(device.fileno(), future.set_result, None)
-        await future
+    for event in device.read_loop():
+        if event.type != evdev.ecodes.EV_KEY:
+            continue
+        key = evdev.categorize(event)
+        tuple_or_func = codes_to_action[key.keycode]
+        if not isinstance(tuple_or_func, tuple):
+            tuple_or_func = (tuple_or_func, (key.key_down,))
+        func, keys = tuple_or_func
+        if key.keystate not in keys:
+            continue
+        func()
 
 
 async def auto_light_adjust():
@@ -99,7 +91,7 @@ async def auto_light_adjust():
 
 async def main():
     auto_light_task = asyncio.create_task(auto_light_adjust())
-    ir_receiver_task = asyncio.create_task(ir_receiver())
+    ir_receiver_task = asyncio.to_thread(ir_receiver)
     done, pending = await asyncio.wait([auto_light_task, ir_receiver_task], return_when=asyncio.FIRST_COMPLETED)
     for p in pending:
         p.cancel()
