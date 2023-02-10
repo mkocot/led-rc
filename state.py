@@ -1,29 +1,7 @@
 import urllib.request
 from urllib.error import URLError, HTTPError
+from socket import timeout
 
-def do_network(method, action, colour, value=None):
-    if action not in ['duty', 'on', 'off']:
-        raise Exception("BAD ACTION")
-    if method == 'PUT' and value is None and action in ['duty']:
-        raise Exception("BAD VALUE")
-    path = f'http://10.0.0.203/api/v1/led/{action}?name={colour}'
-    if method == 'PUT' and value is not None:
-        path += f'&value={value}'
-    # print('path', path, 'method', method, 'value', value)
-    req = urllib.request.Request(path, data=b'', method=method)
-    try:
-        res = urllib.request.urlopen(req, timeout=1)
-        return res.read()
-    except URLError:
-        print("TIMEOUT")
-        pass
-    return None
-
-def put(action, colour, value=None):
-    return do_network('PUT', action, colour, value) == b'OK'
-
-def get(action, colour):
-    return do_network('GET', action, colour)
 
 class State:
     level:int = 0
@@ -35,15 +13,39 @@ class State:
         self.is_on = is_on
         self.colour = colour
 
+    def _do_network(self, method, action, colour, value=None):
+        if action not in ['duty', 'on', 'off']:
+            raise Exception("BAD ACTION")
+        if method == 'PUT' and value is None and action in ['duty']:
+            raise Exception("BAD VALUE")
+        path = f'http://10.0.0.203/api/v1/led/{action}?name={colour}'
+        if method == 'PUT' and value is not None:
+            path += f'&value={value}'
+        # print('path', path, 'method', method, 'value', value)
+        req = urllib.request.Request(path, data=b'', method=method)
+        try:
+            res = urllib.request.urlopen(req, timeout=20)
+            return res.read()
+        except URLError:
+            print("TIMEOUT", path)
+            pass
+        return None
+
+    def _put(self, action, colour, value=None):
+        return self._do_network('PUT', action, colour, value) == b'OK'
+
+    def _get(self, action, colour):
+        return self._do_network('GET', action, colour)
+
     def __str__(self):
         return f'{{level: {self.level}, is_on: {self.is_on}}}'
 
     def fetch(self):
-        self.level = int(get('duty', self.colour))
-        self.is_on = int(get('on', self.colour)) == 1
+        self.level = int(self._get('duty', self.colour))
+        self.is_on = int(self._get('on', self.colour)) == 1
 
     def toggle(self):
-        if not put('off' if self.is_on else 'on', self.colour):
+        if not self._put('off' if self.is_on else 'on', self.colour):
             return False
 
         self.is_on = not self.is_on
@@ -52,7 +54,7 @@ class State:
     def set_level(self, level):
         level = max(min(level, 255), 0)
 
-        if not put('duty', self.colour, level):
+        if not self._put('duty', self.colour, level):
             return False
 
         self.level = level

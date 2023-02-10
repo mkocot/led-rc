@@ -2,16 +2,44 @@ import evdev
 import asyncio
 from state import LightController
 from autolight import AutoLight
+import time
 
 controlled = LightController()
 controlled.fetch()
 controlled.set_active('white')
 
 autolight = AutoLight(controlled)
+auto_enabled = True
 
+def disable_auto():
+    global auto_enabled
+    auto_enabled = False
+
+def enable_auto():
+    global auto_enabled
+    auto_enabled = True
+    white = controlled.colours['white']
+    level = white.level
+    for _ in range(2):
+        white.set_level(0)
+        time.sleep(0.2)
+        white.set_level(32)
+        time.sleep(0.2)
+    white.set_level(level)
+    autolight.tick()
+
+def toggle_auto():
+    def _f():
+        global auto_enabled
+        if auto_enabled:
+            disable_auto()
+        else:
+            enable_auto()
+    return _f
 
 def change(direction):
     def _c():
+        disable_auto()
         # don't go to 0
         if controlled.active.level + direction == 0:
             return
@@ -21,25 +49,29 @@ def change(direction):
 
 def toggle():
     def _t():
+        disable_auto()
         controlled.colours['all'].toggle()
     return _t
 
 
 def toggle_active():
     def _t():
+        disable_auto()
         controlled.active.toggle()
     return _t
 
 
 def set_level(level):
     def _post():
+        disable_auto()
         controlled.active.set_level(level)
     return _post
 
 
 def change_active(colour):
     def _f():
-        controlled.active = controlled.colours[colour]
+        disable_auto()
+        controlled.set_active(colour)
     return _f
 
 
@@ -62,6 +94,7 @@ codes_to_action = {
     'KEY_BLUE': change_active('blue'),
     'KEY_YELLOW': change_active('white'),
     'KEY_OK': toggle_active(),
+    'KEY_PLAY': toggle_auto(),
 }
 
 
@@ -83,9 +116,11 @@ def ir_receiver():
 
 
 async def auto_light_adjust():
+    global auto_enabled
     loop = asyncio.get_running_loop()
     while loop.is_running():
-        autolight.tick()
+        if auto_enabled:
+            autolight.tick()
         await asyncio.sleep(60)
 
 
