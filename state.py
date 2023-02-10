@@ -4,7 +4,9 @@ from socket import timeout
 
 
 class State:
-    level:int = 0
+    timeout = 1
+    timeout_tries = 10
+    level: int = 0
     is_on: bool = False
     colour: str = ''
 
@@ -22,13 +24,18 @@ class State:
         if method == 'PUT' and value is not None:
             path += f'&value={value}'
         # print('path', path, 'method', method, 'value', value)
-        req = urllib.request.Request(path, data=b'', method=method)
-        try:
-            res = urllib.request.urlopen(req, timeout=20)
-            return res.read()
-        except URLError:
-            print("TIMEOUT", path)
-            pass
+        # just try few times and bail
+        for _ in range(self.timeout_tries):
+            req = urllib.request.Request(path, data=b'', method=method)
+            try:
+                res = urllib.request.urlopen(req, timeout=self.timeout)
+                return res.read()
+            except timeout:
+                print("SOCKET timeout", path)
+                continue
+            except URLError:
+                print("TIMEOUT", path)
+                continue
         return None
 
     def _put(self, action, colour, value=None):
