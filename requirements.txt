@@ -1,0 +1,2 @@
+evdev==1.6.1
+git+https://github.com/robinpaulson/suncalcPy2@b56aac4c0466d6674a74970864b8b99fbc3fbf03
