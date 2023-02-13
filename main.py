@@ -99,6 +99,7 @@ codes_to_action = {
 
 
 def ir_receiver():
+    time.sleep(100000)
     device = evdev.InputDevice('/dev/input/by-path/platform-1f02000.ir-event')
     print(device)
 
