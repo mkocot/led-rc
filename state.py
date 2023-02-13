@@ -9,6 +9,7 @@ class State:
     level: int = 0
     is_on: bool = False
     colour: str = ''
+    debug: bool = True
 
     def __init__(self, colour, level=0, is_on=0):
         self.level = level
@@ -23,7 +24,10 @@ class State:
         path = f'http://10.0.0.203/api/v1/led/{action}?name={colour}'
         if method == 'PUT' and value is not None:
             path += f'&value={value}'
-        # print('path', path, 'method', method, 'value', value)
+
+        if self.debug:
+            print(f'{method} {path}')
+
         # just try few times and bail
         for _ in range(self.timeout_tries):
             req = urllib.request.Request(path, data=b'', method=method)

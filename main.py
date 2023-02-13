@@ -112,6 +112,7 @@ def ir_receiver():
         func, keys = tuple_or_func
         if key.keystate not in keys:
             continue
+        print("Handle KEY", key)
         func()
 
 
